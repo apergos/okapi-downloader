@@ -1,0 +1,18 @@
+# sample settings file for the okapi html downlaoder script
+
+# url for retrieving via the okapi api the list of wiki projects that are dumped
+# wikilisturl=https://api.wikimediaenterprise.org/v1/projects
+
+# url for retrieving, via the okapi api, a single dump, except for the wiki name
+# which will be added on to the end
+# basedumpurl=https://api.wikimediaenterprise.org/v1/exports/json/
+
+# full path to the base directory under which downloaded dumps will be stored in
+# subdirectories by date downloaded, all wikis together for one date
+# baseoutdir=/home/ariel/wmf/okapi/downloader/test
+
+# number of SECONDS to wait in between downloading wikis
+# wait=20
+
+# number of MINUTES to wait before retrying the loop over all wikis, in case of failure
+# retrywait=10
