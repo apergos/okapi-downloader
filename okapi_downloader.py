@@ -165,7 +165,7 @@ def usage(message=None):
     if message is not None:
         print(message)
     usage_message = """Usage: okapi_downloader.py [--wikis name[,name,...]]
-         [--creds path-to-recds-file] [--settings path-to-settings-file]
+         [--creds path-to-creds-file] [--settings path-to-settings-file]
          [--retries num] [--verbose]| --help
 
 Arguments:
@@ -184,7 +184,7 @@ Arguments:
                      default: okapi-downloader_settings in current working directory
   --retries  (-r):   number of retries in case downloads fail
                      default: 0 (don't retry)
-  --vernbose (-v):   show some progress messages while running
+  --verbose (-v):   show some progress messages while running
   --help     (-h):   display this usage message
 """
     print(usage_message)
