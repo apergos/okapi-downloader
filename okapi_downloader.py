@@ -87,7 +87,7 @@ class Downloader():
         '''
         produce a filename with wiki and date in it someplace
         '''
-        return "{wiki}-{date}-OKAPI-HTML.json.gz".format(wiki=wiki, date=self.date)
+        return "{wiki}-{date}-OKAPI-HTML.json.tar.gz".format(wiki=wiki, date=self.date)
 
     def get_outfile_path(self, wiki):
         '''
@@ -301,7 +301,7 @@ def do_main():
     if not user or not passwd:
         usage("username and password file must be set up")
     if args['verbose']:
-        print("Credentuials retrieved")
+        print("Credentials retrieved")
     creds = {'user': user, 'passwd': passwd}
 
     if 'settings' in args:
