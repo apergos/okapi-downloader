@@ -1,34 +1,26 @@
-Okapi Downloader
-====================
+Wikimedia Enterprise Downloader
+===============================
 
-This is still incomplete. In fact it won't even download a complete file.
-You have been warned.
-
-The filenames, classes, and every other thing in here might change overnight.
-But better to be stashed here than not be backed up someplace.
+This is not production ready but is ok for testing purposes.
 
 Setup
 --------------------
-Get Okapi credentials from your friendly provider, and stash them into a file
-called .okapi_creds in the durectory where this script is located. See
-.okapi_creds.sample for the format.
+Get Wikimedia Enterprise credentials from your friendly provider, and stash them into a file
+called .wm_enterprise_creds in the durectory where this script is located. See
+.wm_enterprise_creds.sample for the format.
 
-Copy okapi_downloader_settings.sample into okapi_downloader_settings and adjust
-the baseoutdir and the retrywait times to suit. Be nice to the servers.
-Make sure the baseoutdir actually exists.
+Copy wm_enterprise_settings.sample into wm_enterprise_downloader_settings and adjust
+the baseoutdir and the retrywait times to suit. Be nice to the servers. Make sure the baseoutdir
+actually exists.
 
-If you're running your own copy of this script, which I assume you are,
-change the USERAGENT in okapi_downloader.py to have your email address.
-That way the Okapi folks can contact you if there is a problem.
+If you're running your own copy of this script, which I assume you are, change the USERAGENT
+in wm_enterprise_downloader.py to have your email address. That way the Wikimedia Enterprise folks
+can contact you if there is a problem.
 
 Running
 --------------------
 You can get a nice help message with
-python3 ./okapi_downloader.py --help
+python3 ./wm_enterprise_downloader.py --help
 
-You will most likely be interested in only a few wikis. Get them via
-python3 ./okapi_downloader.py --wikis firstwiki,secondwiki,...
-
-That is all.
-
-
+You will most likely be interested in only a few wikis in namespace 0. Get them one at a time via
+python3 ./wm_enterprise_downloader.py --wiki somewiki --namespace 0
