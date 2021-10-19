@@ -458,9 +458,9 @@ def usage(message=None):
     '''display usage info about this script'''
     if message is not None:
         print(message)
-    usage_message = """Usage: wm_enterprise_downloader.py [--wikis name[,name,...]]
+    usage_message = """Usage: wm_enterprise_downloader.py [--wiki name]
          [--creds path-to-creds-file] [--settings path-to-settings-file]
-         [--retries num] [--test] [--maxfails num] [--dryrun] [--verbose]| --help
+         [--retries num] [--test num,num] [--maxfails num] [--dryrun] [--verbose]| --help
 
 Arguments:
 
@@ -543,7 +543,7 @@ def fillin_args(options, args):
             args['ns_id'] = val
         elif opt in ["-w", "--wiki"]:
             args['wiki'] = val
-        elif opt in ["-w", "--settings"]:
+        elif opt in ["-s", "--settings"]:
             args['settings'] = val
         elif opt in ["-r", "--retries"]:
             if not val.isdigit():
