@@ -5,6 +5,7 @@ download Wikimedia Enterprise HTML dumps for all or for specified wiki projects
 '''
 import os
 import getopt
+import hashlib
 import json
 import logging
 import sys
@@ -182,16 +183,31 @@ class Downloader():
                             self.get_projectlist_filename(namespace_id))
         return path
 
+    @staticmethod
+    def get_tmp_outfile(path):
+        '''
+        canonical tmp file name for any generated file that must later be moved into place
+        '''
+        return path + ".tmp"
+
     def get_one_wiki_dump(self, wiki, namespace_id, dryrun):
         '''
         download the dump for one wiki, but if the file is already there, just return
         for dry runs, print the url that would be used to retrieve the wiki dump instead
         of getting it
-        returns True on success, False on error
+        this method cleans up any temporary download that might have been left from a previous
+        download attempt
+        returns True on success or a dry run and False on error
         '''
         outfile = self.get_dump_outfile_path(wiki, namespace_id)
         if os.path.exists(outfile):
             return True
+
+        outfile_tmp = self.get_tmp_outfile(outfile)
+        try:
+            os.unlink(outfile_tmp)
+        except Exception:
+            pass
 
         headers = {'user-agent': USERAGENT, "Accept": "application/json"}
         if dryrun:
@@ -202,7 +218,6 @@ class Downloader():
             with requests.get(os.path.join(self.settings['basedumpurl'], str(namespace_id), wiki),
                               auth=HTTPBasicAuth(self.creds['user'], self.creds['passwd']),
                               headers=headers, stream=True, timeout=TIMEOUT) as response:
-                outfile_tmp = outfile + ".tmp"
                 with open(outfile_tmp, 'wb') as outf:
                     start = time.time()
                     # Chunk size seems ok for speed in limited testing
@@ -212,11 +227,15 @@ class Downloader():
                         if now - start > MAX_REQUEST_TIME:
                             # we're taking too long. network issues? whatever it is, just give up
                             LOG.error("download of wiki %s taking too long, giving up", wiki)
-                            return False
-                os.rename(outfile_tmp, outfile)
+                            raise TimeoutError
         except Exception:
             exc_type, exc_value, exc_traceback = sys.exc_info()
             LOG.error(repr(traceback.format_exception(exc_type, exc_value, exc_traceback)))
+            try:
+                # cleanup partial download if any
+                os.unlink(outfile_tmp)
+            except FileNotFoundError:
+                pass
             return False
         return True
 
@@ -255,12 +274,14 @@ class Downloader():
 
         return namespace_ids, wikis
 
-    def get_dump_info(self, wiki, namespace_id):
+    def get_dump_info(self, wiki, namespace_id, dryrun):
         '''
         for a given wiki and namespace id, return md5sum and last modified date for
         the current dump, or None, None if there is no information available, or there
         is an error
         '''
+        if dryrun:
+            return "dummymd5", "dummydate"
         md5sum = None
         last_modified = None
         headers = {'user-agent': USERAGENT, "Accept": "application/json"}
@@ -324,7 +345,7 @@ class Downloader():
     def record_md5sum_last_modified(self, wiki_todo, namespace_id, md5sum_end, last_modified_end):
         '''
         record the md5sum and timestamp of the dump for the specified wiki in a file
-        for later downlaod along with the dump file itself
+        for later download along with the dump file itself
         '''
         outfile = self.get_dumpstats_path(wiki_todo, namespace_id)
         outfile_tmp = outfile + ".tmp"
@@ -357,56 +378,98 @@ class Downloader():
             return True
         return False
 
-    def get_wiki_dump_and_info(self, wiki_todo, ns_id_todo, dryrun):
+    @staticmethod
+    def compute_md5sum(path):
         '''
-        retrieve dump file for a wiki and namespace, along with its md5hash,
-        downloading again in the case where the md5hash of the dump or the date
-        it was produced has changed in the meantime
+        compute the md5 sum of the dump file for the given wiki and namespace in
+        the specified directory
+        returns None on error
+        '''
+        summer = hashlib.md5()
+        try:
+            with open(path, "rb") as infile:
+                bufsize = 4192 * 32
+                buff = infile.read(bufsize)
+                while buff:
+                    summer.update(buff)
+                    buff = infile.read(bufsize)
+                infile.close()
+            return summer.hexdigest()
+        except Exception:
+            LOG.error("failed to compute md5sum of %s", path)
+            return None
 
-        if the info file and the dump output file already exist, simply return True
-
-        returns True on success, False on error
+    def dump_done(self, wiki_todo, ns_id_todo):
+        '''
+        see if the dump info file and dump content file are already
+        downloaded for this date
+        return True if so, False otherwise
         '''
         if (self.dump_info_exists(wiki_todo, ns_id_todo) and
                 self.wiki_dump_exists(wiki_todo, ns_id_todo)):
             LOG.debug("dump info and content files exist for %s (NS %s) for this run, skipping.",
                       wiki_todo, ns_id_todo)
             return True
+        return False
 
+    def get_wiki_dump_and_info(self, wiki_todo, ns_id_todo, dryrun):
+        '''
+        retrieve dump file for a wiki and namespace, along with its md5sum,
+        downloading again in the case where the md5sum of the dump or the date
+        it was produced doesn't match or may have been changed in the meantime
+
+        if the info file and the dump output file already exist, simply return True
+
+        returns True on success, False on error
+        '''
         # get the info for this dump before starting (date last modified, md5 hash)
-        if not dryrun:
-            md5sum_start, last_modified_start = self.get_dump_info(wiki_todo, ns_id_todo)
-            if not md5sum_start or not last_modified_start:
-                return False
-            LOG.debug("Wiki %s, namespace %s, start md5sum:%s, modified:%s",
-                      wiki_todo, ns_id_todo, md5sum_start, last_modified_start)
+        md5sum_claimed, last_modified = self.get_dump_info(wiki_todo, ns_id_todo, dryrun)
+        if not md5sum_claimed or not last_modified:
+            return False
+        LOG.debug("Wiki %s, namespace %s, md5sum:%s, modified:%s",
+                  wiki_todo, ns_id_todo, md5sum_claimed, last_modified)
 
-        result = self.get_one_wiki_dump(wiki_todo, ns_id_todo, dryrun)
-        if not result:
+        # get the dump content file
+        if not self.get_one_wiki_dump(wiki_todo, ns_id_todo, dryrun):
             LOG.debug("error from dump retrieval for %s", wiki_todo)
             return False
 
-        # get the same info for this dump after ending (date last modified, md5 hash)
-        if not dryrun:
-            md5sum_end, last_modified_end = self.get_dump_info(wiki_todo, ns_id_todo)
-            if not md5sum_start or not last_modified_start:
+        if dryrun:
+            # no check of md5sum in dryrun because we didn't actually download anything
+            return True
+
+        # check the md5sum of what we just downloaded against what the dump info claims
+        outfile = self.get_dump_outfile_path(wiki_todo, ns_id_todo)
+        outfile_tmp = self.get_tmp_outfile(outfile)
+        md5sum_computed = self.compute_md5sum(outfile_tmp)
+
+        if md5sum_claimed != md5sum_computed:
+            # Houston, we have a problem. Try downloading one more time
+            if not self.get_one_wiki_dump(wiki_todo, ns_id_todo, dryrun):
+                LOG.debug("error from second dump retrieval for %s for namespace %s",
+                          wiki_todo, ns_id_todo)
                 return False
-            LOG.debug("Wiki %s, namespace %s, wnd md5sum:%s, modified:%s",
-                      wiki_todo, ns_id_todo, md5sum_start, last_modified_start)
 
-            # if it's different because a new version of the dump was produced in the
-            # meantime, and maybe we got the new version or maybe the old one,
-            # we don't know which hash is the right one, get the file again
-            # this should be a rare occurrence so it's not so wasteful
-            if md5sum_start != md5sum_end or last_modified_start != last_modified_end:
-
-                result = self.get_one_wiki_dump(wiki_todo, ns_id_todo, dryrun)
-                if not result:
-                    LOG.debug("error from dump retrieval for %s for namespace %s",
-                              wiki_todo, ns_id_todo)
+            md5sum_computed = self.compute_md5sum(outfile_tmp)
+            if md5sum_claimed != md5sum_computed:
+                # get a new info file and see if that's any better, maybe the new download
+                # is a newly produced dump
+                md5sum_claimed, last_modified = self.get_dump_info(wiki_todo, ns_id_todo, dryrun)
+                if md5sum_claimed != md5sum_computed:
+                    try:
+                        os.unlink(outfile_tmp)
+                    except Exception:
+                        pass
                     return False
 
-            self.record_md5sum_last_modified(wiki_todo, ns_id_todo, md5sum_end, last_modified_end)
+        # success! move the file into place and call it a day
+        try:
+            os.rename(outfile_tmp, outfile)
+        except Exception:
+            LOG.error("Failed to rename %s to %s", outfile_tmp, outfile)
+            return False
+
+        self.record_md5sum_last_modified(wiki_todo, ns_id_todo, md5sum_computed, last_modified)
 
         return True
 
@@ -444,6 +507,9 @@ class Downloader():
                     if not dryrun:
                         time.sleep(self.settings['wait'])
 
+                if self.dump_done(wiki_todo, ns_id_todo):
+                    continue
+
                 if not self.get_wiki_dump_and_info(wiki_todo, ns_id_todo, dryrun):
                     consecutive_fails += 1
                     if consecutive_fails > self.maxfails:
@@ -473,8 +539,7 @@ Arguments:
                              blank lines and those starting with '#' are skipped
                      default: .wm_enterprise_creds in current working directory
   --settings  (-s):  path to settings file
-                     format: two lines, varname=value, with the varnames wikilisturl,
-                             outputdir, and dumpsurl; see the sample file in this repo
+                     format: two lines, varname=value; see the sample file in this repo
                              for each setting and its default value
                              blank lines and those starting with '#' are skipped
                      default: wm_enterprise_downloader_settings in current working directory
@@ -576,6 +641,8 @@ def get_args():
 
     args = {'namespace:': None, 'retries': 0, 'maxfails': 5, 'ns_id': None,
             'wiki': None, 'test': None, 'dryrun': False, 'verbose': False}
+    args['settings' ] = os.path.join(os.getcwd(), 'wm_enterprise_downloader_settings')
+    args['creds'] = os.path.join(os.getcwd(), '.wm_enterprise_creds')
 
     fillin_args(options, args)
 
@@ -689,10 +756,12 @@ def get_creds(args):
     '''
     get and return user credentials for access to the WM Enterprise API
     '''
-    credspath = args.get('creds', os.path.join(os.getcwd(), '.wm_enterprise_creds'))
+    credspath = args['creds']
+    if not os.path.exists(credspath):
+        usage('Failed to find specified credentials file ' + credspath)
     user, passwd = read_creds(credspath)
     if not user or not passwd:
-        usage("username and password file must be set up")
+        usage("username and password file must be set up with both user and password")
     LOG.debug("Credentials retrieved")
     creds = {'user': user, 'passwd': passwd}
     return creds
@@ -702,12 +771,9 @@ def get_settings(args):
     '''
     get and return settings from the file apecified in the args
     '''
-    if 'settings' in args:
-        settingspath = args['settings']
-        if not os.path.exists(settingspath):
-            usage('Failed to find specified settings file ' + settingspath)
-    else:
-        settingspath = os.path.join(os.getcwd(), 'wm_enterprise_downloader_settings')
+    settingspath = args['settings']
+    if not os.path.exists(settingspath):
+        usage('Failed to find specified settings file ' + settingspath)
     settings = read_settings(settingspath)
     return settings
 
